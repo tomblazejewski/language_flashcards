@@ -131,7 +131,7 @@ async def revoke_refresh_token(raw: str, db: AsyncSession) -> None:
 
 
 async def get_user_by_email(email: str, db: AsyncSession) -> User | None:
-    result = await db.execute(select(User).where(User.email == email))
+    result = await db.execute(select(User).where(User.email == email.lower().strip()))
     return result.scalar_one_or_none()
 
 
@@ -142,11 +142,12 @@ async def get_user_by_id(user_id: str, db: AsyncSession) -> User | None:
 
 async def create_user(email: str, password: str, db: AsyncSession) -> User:
     """Create and persist a new user. Raises ``ValueError`` if email is taken."""
+    email = email.lower().strip()
     if await get_user_by_email(email, db):
         raise ValueError("Email already registered")
     user = User(
         id=str(uuid.uuid4()),
-        email=email.lower().strip(),
+        email=email,
         password_hash=hash_password(password),
     )
     db.add(user)

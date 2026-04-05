@@ -1,33 +1,42 @@
 """
 Shared pytest fixtures for the test suite.
 
-Uses an in-memory SQLite database per test session so tests are isolated
-from the dev.db and from each other (each test gets a fresh session via
-the overridden get_db dependency).
+Uses a single in-memory SQLite database shared across all connections via
+StaticPool. Every test is wrapped in a transaction that is rolled back
+afterwards, keeping tests isolated without recreating the schema.
+
+The `db_session` fixture owns the connection, transaction, and FastAPI
+`get_db` override. The `rollback_after_test` autouse fixture depends on
+`db_session`, ensuring every test — even those that never mention
+`db_session` explicitly — gets the override installed and the rollback
+applied.
 """
 
 from __future__ import annotations
+
+from collections.abc import AsyncGenerator
 
 import pytest
 from app.db.database import Base, get_db
 from app.main import app
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.pool import StaticPool
 
-# In-memory SQLite — recreated fresh for every test module load.
+# StaticPool forces every engine.connect() to reuse the same underlying
+# connection, so create_tables and all test sessions share one in-memory DB.
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
-test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-TestSessionLocal = async_sessionmaker(
-    bind=test_engine,
-    expire_on_commit=False,
-    class_=AsyncSession,
+test_engine = create_async_engine(
+    TEST_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
 )
 
 
 @pytest.fixture(autouse=True, scope="session")
-async def create_tables():
-    """Create all tables once for the test session."""
+async def create_tables() -> AsyncGenerator[None, None]:
+    """Create all tables once for the entire test session."""
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
@@ -35,38 +44,40 @@ async def create_tables():
         await conn.run_sync(Base.metadata.drop_all)
 
 
-@pytest.fixture(autouse=True)
-async def rollback_after_test():
+@pytest.fixture
+async def db_session() -> AsyncGenerator[AsyncSession, None]:
     """
-    Wrap each test in a transaction that is rolled back afterwards,
-    keeping tests isolated without recreating the schema every time.
+    Open a connection, begin a savepoint transaction, install the get_db
+    override, and yield the session.  The transaction is rolled back on
+    teardown, leaving the DB clean for the next test.
     """
     async with test_engine.connect() as conn:
         await conn.begin()
         session = AsyncSession(bind=conn, expire_on_commit=False)
 
-        async def override_get_db():
-            try:
-                yield session
-            finally:
-                pass  # do not commit – rollback handled below
+        async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
+            yield session
 
-        app.dependency_overrides[get_db] = override_get_db
-        yield
-        await session.close()
-        await conn.rollback()
+        app.dependency_overrides[get_db] = _override_get_db
+        try:
+            yield session
+        finally:
+            await session.close()
+            await conn.rollback()
+            app.dependency_overrides.pop(get_db, None)
 
-    app.dependency_overrides.pop(get_db, None)
+
+@pytest.fixture(autouse=True)
+async def rollback_after_test(db_session: AsyncSession) -> AsyncGenerator[None, None]:
+    """
+    Autouse fixture that simply depends on `db_session`, guaranteeing that
+    every test — including those that never request `db_session` directly —
+    gets the get_db override installed and the rollback applied.
+    """
+    yield
 
 
 @pytest.fixture
-async def client() -> AsyncClient:
+async def client() -> AsyncGenerator[AsyncClient, None]:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
-
-
-@pytest.fixture
-async def db_session() -> AsyncSession:
-    """Yield the same session used by the current test's request cycle."""
-    async with TestSessionLocal() as session:
-        yield session

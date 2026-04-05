@@ -5,14 +5,19 @@ WORKDIR /app
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy dependency manifest and lockfile first for layer caching
+# Place the virtualenv outside the source bind-mount so a docker-compose
+# volume mount of ./backend:/app never shadows the installed packages.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+
+# Copy dependency manifest and lockfile first for layer caching.
+# Install third-party dependencies without the project itself so this
+# expensive layer is only invalidated when dependencies change.
 COPY pyproject.toml uv.lock ./
+RUN uv sync --no-dev --frozen --no-install-project
 
-# Install production dependencies only (no dev extras), respecting the lockfile
-RUN uv sync --no-dev --frozen
-
-# Copy application source
+# Copy application source, then install the project itself.
 COPY backend/ ./
+RUN uv sync --no-dev --frozen
 
 EXPOSE 8000
 

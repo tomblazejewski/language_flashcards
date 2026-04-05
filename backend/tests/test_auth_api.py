@@ -166,3 +166,21 @@ async def test_me_without_token_returns_401(client: AsyncClient):
 async def test_me_with_bad_token_returns_401(client: AsyncClient):
     r = await client.get("/auth/me", headers={"Authorization": "Bearer garbage"})
     assert r.status_code == 401
+
+
+async def test_register_duplicate_email_mixed_case_returns_409(client: AsyncClient):
+    """Registering the same email with different casing must be rejected."""
+    await register(client, "MixedCase@example.com")
+    resp = await register(client, "mixedcase@example.com")
+    assert resp.status_code == 409
+
+
+async def test_login_with_mixed_case_email(client: AsyncClient):
+    """Login must work regardless of the case used at registration."""
+    await register(client, "CaseLogin@example.com")
+    resp = await client.post(
+        "/auth/login",
+        json={"email": "caselogin@EXAMPLE.COM", "password": "password123"},
+    )
+    assert resp.status_code == 200
+    assert "access_token" in resp.json()

@@ -29,11 +29,14 @@ async def _require_review_config(review_config_id: str, current_user: User, db: 
     return config
 
 
-async def _require_review_log(review_log_id: str, current_user: User, db: AsyncSession) -> ReviewLog:
+async def _require_review_log(
+    review_log_id: str, review_config_id: str, current_user: User, db: AsyncSession
+) -> ReviewLog:
     result = await db.execute(
         select(ReviewLog).where(
             ReviewLog.id == review_log_id,
             ReviewLog.user_id == current_user.id,
+            ReviewLog.review_config_id == review_config_id,
         )
     )
     log = result.scalar_one_or_none()
@@ -78,9 +81,10 @@ async def review_card(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ReviewResponse:
-    # Validate the config belongs to this user
+    # Validate the config belongs to this user, and that the log belongs
+    # to both the user AND this specific config (prevents cross-config corruption)
     await _require_review_config(review_config_id, current_user, db)
-    log = await _require_review_log(review_log_id, current_user, db)
+    log = await _require_review_log(review_log_id, review_config_id, current_user, db)
 
     updated_log = await submit_review(log=log, rating_int=body.rating, db=db)
 

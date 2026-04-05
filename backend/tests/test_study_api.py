@@ -188,3 +188,55 @@ async def test_review_config_isolation(client: AsyncClient):
 async def test_review_requires_auth(client: AsyncClient):
     resp = await client.get("/study/some-id/next")
     assert resp.status_code in (401, 403)
+
+
+async def test_review_log_must_belong_to_config_in_path(client: AsyncClient):
+    """
+    A review log tied to config A must not be accepted at config B's endpoint,
+    even when both configs belong to the same user.
+    """
+    # Setup: one course, two review configs (Word->Translation and Translation->Word)
+    await client.post("/auth/register", json={"email": "s9@example.com", "password": "pass1234"})
+    token = (await client.post("/auth/login", json={"email": "s9@example.com", "password": "pass1234"})).json()[
+        "access_token"
+    ]
+    headers = _h(token)
+
+    course = (
+        await client.post(
+            "/courses",
+            json={"name": "Cross-config test", "column_definitions": COLS},
+            headers=headers,
+        )
+    ).json()
+    await client.post(
+        f"/courses/{course['id']}/flashcards",
+        json={"data": {"Word": "猫", "Translation": "cat"}},
+        headers=headers,
+    )
+
+    rc_a = (
+        await client.post(
+            f"/courses/{course['id']}/review-configs",
+            json={"question_column": "Word", "answer_column": "Translation"},
+            headers=headers,
+        )
+    ).json()
+    rc_b = (
+        await client.post(
+            f"/courses/{course['id']}/review-configs",
+            json={"question_column": "Translation", "answer_column": "Word"},
+            headers=headers,
+        )
+    ).json()
+
+    # Get a log from config A
+    log_id = (await client.get(f"/study/{rc_a['id']}/next", headers=headers)).json()["review_log_id"]
+
+    # Submitting that log to config B's endpoint must be rejected
+    resp = await client.post(
+        f"/study/{rc_b['id']}/review/{log_id}",
+        json={"rating": 3},
+        headers=headers,
+    )
+    assert resp.status_code == 404
