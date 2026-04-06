@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db.database import get_db
+from app.models.course import Course
 from app.models.user import User
 from app.schemas.imports import AnkiFieldMapping, CsvColumnMapping, ImportResult
 from app.services.course import get_course
@@ -19,7 +20,8 @@ router = APIRouter(prefix="/courses", tags=["imports"])
 _MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
-async def _require_course_for_import(course_id: str, current_user: User, db: AsyncSession):  # type: ignore[return]
+async def _require_course_for_import(course_id: str, current_user: User, db: AsyncSession) -> Course:
+    """Return the course or raise 404."""
     course = await get_course(course_id, current_user.id, db)
     if course is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found.")
@@ -34,7 +36,8 @@ async def _require_course_for_import(course_id: str, current_user: User, db: Asy
     description=(
         "Upload a UTF-8 CSV file.  The first row must be a header row.  "
         "By default, column headers are matched to course column names by exact name.  "
-        "Pass an optional JSON-encoded `column_mapping` array to override the mapping."
+        "Pass an optional JSON-encoded `column_mapping` array to override the mapping.  "
+        "Every `course_column` value in the mapping must be a valid column in the course."
     ),
 )
 async def import_csv_endpoint(
@@ -68,13 +71,19 @@ async def import_csv_endpoint(
             ) from exc
 
     column_names: list[str] = [col["name"] for col in course.column_definitions]
-    return await import_csv(
-        course_id=course_id,
-        file_bytes=raw,
-        column_names=column_names,
-        column_mapping=mapping,
-        db=db,
-    )
+    try:
+        return await import_csv(
+            course_id=course_id,
+            file_bytes=raw,
+            column_names=column_names,
+            column_mapping=mapping,
+            db=db,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
 
 @router.post(
@@ -85,7 +94,8 @@ async def import_csv_endpoint(
     description=(
         "Upload an Anki `.apkg` package.  Notes from the first note type are imported.  "
         "By default, Anki field names are matched to course column names by exact name.  "
-        "Pass an optional JSON-encoded `field_mapping` array to override the mapping."
+        "Pass an optional JSON-encoded `field_mapping` array to override the mapping.  "
+        "Every `course_column` value in the mapping must be a valid column in the course."
     ),
 )
 async def import_anki_endpoint(
@@ -119,10 +129,16 @@ async def import_anki_endpoint(
             ) from exc
 
     column_names: list[str] = [col["name"] for col in course.column_definitions]
-    return await import_anki(
-        course_id=course_id,
-        apkg_bytes=raw,
-        column_names=column_names,
-        field_mapping=mapping,
-        db=db,
-    )
+    try:
+        return await import_anki(
+            course_id=course_id,
+            apkg_bytes=raw,
+            column_names=column_names,
+            field_mapping=mapping,
+            db=db,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc

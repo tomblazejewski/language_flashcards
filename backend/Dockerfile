@@ -16,9 +16,11 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --no-dev --frozen --no-install-project
 
 # Copy application source, then install the project itself.
-COPY backend/ ./
+# Keep the same layout as the repo (backend/ inside /app) so the package
+# path declared in pyproject.toml ("packages = ['backend']") is satisfied.
+COPY backend/ backend/
 RUN uv sync --no-dev --frozen
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

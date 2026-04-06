@@ -43,19 +43,26 @@ def _ensure_utc(dt: datetime) -> datetime:
 
 
 async def _bulk_ensure_review_logs(
-    flashcards: list[Flashcard],
+    course_id: str,
     review_config_id: str,
     user_id: str,
     db: AsyncSession,
 ) -> None:
     """
-    Ensure every flashcard in the list has a ReviewLog row for the given
-    (review_config_id, user_id).  Uses a single SELECT to find existing rows,
-    then bulk-inserts the missing ones in one flush — O(1) round trips.
-    """
-    flashcard_ids = [fc.id for fc in flashcards]
+    Ensure every flashcard in *course_id* has a ReviewLog row for the given
+    (review_config_id, user_id).
 
-    # Fetch all existing log rows for this config+user in one query
+    Uses two queries — one to fetch flashcard IDs, one to find already-covered
+    IDs — then bulk-inserts missing rows in a single flush.  O(1) round trips
+    regardless of course size.
+    """
+    # Fetch only the IDs we need — avoid loading full Flashcard objects
+    fc_id_result = await db.execute(select(Flashcard.id).where(Flashcard.course_id == course_id))
+    flashcard_ids = [row[0] for row in fc_id_result.all()]
+    if not flashcard_ids:
+        return
+
+    # Fetch existing log rows for this config+user in one query
     existing_result = await db.execute(
         select(ReviewLog.flashcard_id).where(
             ReviewLog.review_config_id == review_config_id,
@@ -94,44 +101,53 @@ async def get_next_card(
     Return the (ReviewLog, Flashcard) pair for the card most overdue (or next
     due) for this user/config.  Initialises ReviewLog rows for any flashcards
     that have never been seen (bulk, O(1) queries).
-    """
-    # Load all flashcards in the course
-    fc_result = await db.execute(select(Flashcard).where(Flashcard.course_id == review_config.course_id))
-    flashcards = list(fc_result.scalars().all())
-    if not flashcards:
-        return None
 
-    # Ensure every flashcard has a ReviewLog row — bulk, no N+1
-    await _bulk_ensure_review_logs(flashcards, review_config.id, user_id, db)
+    Selection is done entirely in SQL:
+
+    1. Try to find the earliest overdue-or-unseen log
+       (``due_date IS NULL OR due_date <= now``).
+    2. If none are due yet, return the log with the soonest upcoming due date.
+
+    This is O(log n) in the DB index rather than O(n) in Python.
+    """
+    # Ensure every flashcard in the course has a ReviewLog row
+    await _bulk_ensure_review_logs(review_config.course_id, review_config.id, user_id, db)
 
     now = _utc_now()
+    base_filter = (
+        ReviewLog.review_config_id == review_config.id,
+        ReviewLog.user_id == user_id,
+    )
 
-    # Find the due review log with the earliest due_date
-    logs_result = await db.execute(
+    # 1. Earliest overdue (or never-seen) card
+    overdue_result = await db.execute(
         select(ReviewLog)
         .where(
-            ReviewLog.review_config_id == review_config.id,
-            ReviewLog.user_id == user_id,
+            *base_filter,
+            (ReviewLog.due_date.is_(None)) | (ReviewLog.due_date <= now),
         )
         .order_by(ReviewLog.due_date.asc().nullsfirst())
+        .limit(1)
     )
-    logs = list(logs_result.scalars().all())
+    log = overdue_result.scalar_one_or_none()
 
-    # Prefer overdue cards; fall back to the soonest upcoming
-    overdue = [log for log in logs if log.due_date is None or _ensure_utc(log.due_date) <= now]
-    candidates = overdue if overdue else logs
-    if not candidates:
+    # 2. Fallback: soonest upcoming card
+    if log is None:
+        upcoming_result = await db.execute(
+            select(ReviewLog).where(*base_filter).order_by(ReviewLog.due_date.asc()).limit(1)
+        )
+        log = upcoming_result.scalar_one_or_none()
+
+    if log is None:
         return None
 
-    best_log = candidates[0]
-
-    # Fetch the associated flashcard
-    fc_result2 = await db.execute(select(Flashcard).where(Flashcard.id == best_log.flashcard_id))
-    flashcard = fc_result2.scalar_one_or_none()
+    # Point-query for the flashcard (avoids joining a potentially large table)
+    fc_result = await db.execute(select(Flashcard).where(Flashcard.id == log.flashcard_id))
+    flashcard = fc_result.scalar_one_or_none()
     if flashcard is None:
         return None
 
-    return best_log, flashcard
+    return log, flashcard
 
 
 async def submit_review(

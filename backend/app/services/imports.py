@@ -14,8 +14,16 @@ lookup.
 Row validation
 --------------
 A row is rejected (added to ``errors``) when:
-- It maps to a data dict that has no non-empty values.
-- For CSV: when the number of columns in a data row doesn't match the header.
+- It has no non-empty values after mapping.
+- For CSV: the row has more or fewer fields than the header (``csv.DictReader``
+  signals this by putting a ``None`` key in the row dict).
+
+Column mapping validation
+-------------------------
+When an explicit ``column_mapping`` or ``field_mapping`` is supplied, every
+``course_column`` value must be a known column in the course's
+``column_definitions``.  Unknown columns raise ``ValueError``; the API layer
+converts this to a 422 response.
 
 Media references in Anki cards (e.g. ``[sound:foo.mp3]`` or ``<img …>``) are
 stripped to plain text because we don't yet have a media-storage layer.
@@ -26,11 +34,11 @@ from __future__ import annotations
 import csv
 import io
 import json
-import os
 import re
 import sqlite3
 import tempfile
 import zipfile
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -80,6 +88,23 @@ async def _bulk_insert(
     await db.flush()
 
 
+def _validate_course_columns(mapping_values: list[str], column_names: list[str]) -> None:
+    """
+    Raise ``ValueError`` if any mapped course column is not in *column_names*.
+
+    Parameters
+    ----------
+    mapping_values:
+        The ``course_column`` values from an explicit mapping.
+    column_names:
+        The course's known column names (from ``column_definitions``).
+    """
+    known = set(column_names)
+    unknown = [c for c in mapping_values if c not in known]
+    if unknown:
+        raise ValueError(f"Unknown course column(s) in mapping: {unknown}. Valid columns are: {column_names}")
+
+
 # ---------------------------------------------------------------------------
 # CSV import
 # ---------------------------------------------------------------------------
@@ -102,11 +127,18 @@ async def import_csv(
     file_bytes:
         Raw bytes of the uploaded CSV file.
     column_names:
-        The course's ``column_definitions`` names — used to validate that at
-        least the mapped columns exist.
+        The course's ``column_definitions`` names.  When *column_mapping* is
+        ``None``, only CSV headers whose names exactly match a course column are
+        imported.  When *column_mapping* is provided, every ``course_column``
+        must be present in this list (raises ``ValueError`` otherwise).
     column_mapping:
         Optional explicit ``csv_header → course_column`` mappings.  When
         ``None``, CSV headers are matched to course columns by exact name.
+
+    Raises
+    ------
+    ValueError
+        If *column_mapping* references a course column that does not exist.
     """
     try:
         text = file_bytes.decode("utf-8-sig")  # handle optional BOM
@@ -119,8 +151,9 @@ async def import_csv(
 
     csv_headers: list[str] = list(reader.fieldnames)
 
-    # Build mapping: csv_header → course_column
+    # Build and validate mapping: csv_header → course_column
     if column_mapping:
+        _validate_course_columns([m.course_column for m in column_mapping], column_names)
         header_to_col: dict[str, str] = {m.csv_header: m.course_column for m in column_mapping}
     else:
         # auto: keep only headers that exactly match a course column
@@ -133,6 +166,17 @@ async def import_csv(
     skipped = 0
 
     for row_num, raw_row in enumerate(reader, start=2):  # row 1 = header
+        # csv.DictReader signals a row with too many/too few fields by adding a
+        # None key.  Reject these rows rather than silently dropping data.
+        if None in raw_row:
+            errors.append(
+                ImportRowError(
+                    row=row_num,
+                    message="Row has a different number of fields than the header",
+                )
+            )
+            continue
+
         data: dict[str, Any] = {}
         for csv_h, col in header_to_col.items():
             data[col] = raw_row.get(csv_h, "")
@@ -184,13 +228,18 @@ def _parse_anki_notes(db_bytes: bytes) -> tuple[list[str], list[list[str]]]:
     the first model's schema; rows belonging to other models are skipped.
 
     Note: ``sqlite3.Connection.deserialize()`` is not available in all Python
-    builds (it requires ``SQLITE_ENABLE_DESERIALIZE``).  We use a named temp
-    file instead, which is universally supported.
+    builds (it requires ``SQLITE_ENABLE_DESERIALIZE``).  We write the bytes to
+    a named temp file via :meth:`pathlib.Path.write_bytes` (which guarantees a
+    complete write) and open it with ``sqlite3.connect``.
     """
-    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".anki2")
+    with tempfile.NamedTemporaryFile(suffix=".anki2", delete=False) as tmp:
+        tmp_path = tmp.name
+
     try:
-        os.write(tmp_fd, db_bytes)
-        os.close(tmp_fd)
+        # write_bytes guarantees all bytes are written in one call, unlike
+        # os.write() which can short-write on some platforms.
+        Path(tmp_path).write_bytes(db_bytes)
+
         conn = sqlite3.connect(tmp_path)
         try:
             # --- Retrieve field names from models JSON ---
@@ -212,7 +261,7 @@ def _parse_anki_notes(db_bytes: bytes) -> tuple[list[str], list[list[str]]]:
         finally:
             conn.close()
     finally:
-        os.unlink(tmp_path)
+        Path(tmp_path).unlink(missing_ok=True)
 
     rows = [row[0].split("\x1f") for row in note_rows]
     return field_names, rows
@@ -235,10 +284,18 @@ async def import_anki(
     apkg_bytes:
         Raw bytes of the uploaded ``.apkg`` file.
     column_names:
-        The course's ``column_definitions`` names.
+        The course's ``column_definitions`` names.  When *field_mapping* is
+        ``None``, only Anki fields whose names exactly match a course column are
+        imported.  When *field_mapping* is provided, every ``course_column``
+        must be present in this list (raises ``ValueError`` otherwise).
     field_mapping:
         Optional explicit ``anki_field → course_column`` mappings.  When
         ``None``, Anki field names are matched to course columns by exact name.
+
+    Raises
+    ------
+    ValueError
+        If *field_mapping* references a course column that does not exist.
     """
     try:
         db_bytes = _extract_anki_db_bytes(apkg_bytes)
@@ -261,8 +318,9 @@ async def import_anki(
     if not field_names:
         return ImportResult(imported=0, skipped=0, errors=[])
 
-    # Build mapping: anki_field → course_column
+    # Build and validate mapping: anki_field → course_column
     if field_mapping:
+        _validate_course_columns([m.course_column for m in field_mapping], column_names)
         field_to_col: dict[str, str] = {m.anki_field: m.course_column for m in field_mapping}
     else:
         col_set = set(column_names)

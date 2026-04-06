@@ -9,9 +9,9 @@ Usage:
     # or directly:
     uv run python backend/scripts/seed.py
 
-The seed password is read from the SEED_PASSWORD environment variable.
-If not set, a default of "password123" is used and a warning is printed.
-The password is never echoed to stdout.
+The seed password must be supplied via the SEED_PASSWORD environment variable.
+The script exits immediately with a non-zero status if the variable is not set,
+to prevent accidental execution against shared or production environments.
 """
 
 from __future__ import annotations
@@ -28,19 +28,21 @@ from app.db.database import AsyncSessionLocal, Base, engine
 from app.services.auth import create_user, get_user_by_email
 
 SEED_EMAIL = "admin@example.com"
-_DEFAULT_PASSWORD = "password123"
 
 
 async def main() -> None:
     seed_password = os.environ.get("SEED_PASSWORD", "")
-    using_default = not seed_password
-    if using_default:
-        seed_password = _DEFAULT_PASSWORD
+    if not seed_password:
         print(
-            "Warning: SEED_PASSWORD env var not set. "
-            f"Using default password for {SEED_EMAIL}. "
-            "Set SEED_PASSWORD to override."
+            "Error: SEED_PASSWORD environment variable is not set.\n"
+            "Set it before running the seed script to prevent accidental use\n"
+            "of a well-known password in shared or production environments.\n"
+            "\n"
+            "  export SEED_PASSWORD=<your-password>\n"
+            "  uv run python backend/scripts/seed.py",
+            file=sys.stderr,
         )
+        sys.exit(1)
 
     # Ensure tables exist (handy if running against a fresh SQLite dev.db
     # without having run `make migrate` first).
@@ -56,10 +58,7 @@ async def main() -> None:
         user = await create_user(SEED_EMAIL, seed_password, session)
         await session.commit()
         print(f"Created seed user: {user.email}")
-        if using_default:
-            print("  Login with the default password (see SEED_PASSWORD warning above).")
-        else:
-            print("  Password was set via SEED_PASSWORD env var.")
+        print("  Password was set via SEED_PASSWORD env var.")
 
 
 if __name__ == "__main__":
