@@ -18,6 +18,31 @@ from app.services.imports import import_anki, import_csv
 router = APIRouter(prefix="/courses", tags=["imports"])
 
 _MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+_CHUNK_SIZE = 64 * 1024  # 64 KB
+
+
+async def _read_limited(file: UploadFile) -> bytes:
+    """
+    Read *file* in chunks, raising HTTP 413 if the total exceeds *_MAX_UPLOAD_BYTES*.
+
+    Reading in chunks rather than a single ``await file.read()`` prevents a
+    client from forcing the entire (arbitrarily large) body into memory before
+    the size check fires.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File exceeds the {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 async def _require_course_for_import(course_id: str, current_user: User, db: AsyncSession) -> Course:
@@ -52,12 +77,7 @@ async def import_csv_endpoint(
 ) -> ImportResult:
     course = await _require_course_for_import(course_id, current_user, db)
 
-    raw = await file.read()
-    if len(raw) > _MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File exceeds the {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
-        )
+    raw = await _read_limited(file)
 
     mapping: list[CsvColumnMapping] | None = None
     if column_mapping is not None:
@@ -110,12 +130,7 @@ async def import_anki_endpoint(
 ) -> ImportResult:
     course = await _require_course_for_import(course_id, current_user, db)
 
-    raw = await file.read()
-    if len(raw) > _MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File exceeds the {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
-        )
+    raw = await _read_limited(file)
 
     mapping: list[AnkiFieldMapping] | None = None
     if field_mapping is not None:

@@ -35,12 +35,6 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _ensure_utc(dt: datetime) -> datetime:
-    """Attach UTC timezone if the datetime is naive (SQLite quirk)."""
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt
-
 
 async def _bulk_ensure_review_logs(
     course_id: str,

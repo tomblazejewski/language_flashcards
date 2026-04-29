@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-async def register(client: AsyncClient, email: str = "test@example.com", password: str = "password123") -> dict:
-    resp = await client.post("/auth/register", json={"email": email, "password": password})
-    return resp
+async def register(client: AsyncClient, email: str = "test@example.com", password: str = "password123") -> Response:
+    return await client.post("/auth/register", json={"email": email, "password": password})
 
 
-async def login(client: AsyncClient, email: str = "test@example.com", password: str = "password123") -> dict:
-    resp = await client.post("/auth/login", json={"email": email, "password": password})
-    return resp
+async def login(client: AsyncClient, email: str = "test@example.com", password: str = "password123") -> Response:
+    return await client.post("/auth/login", json={"email": email, "password": password})
 
 
 # ---------------------------------------------------------------------------
