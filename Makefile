@@ -3,7 +3,7 @@
 PYTHON := uv run python
 PYTEST := uv run pytest
 RUFF   := uv run ruff
-MYPY   := uv run mypy
+TY     := uv run ty
 ALEMBIC := uv run --directory backend alembic
 
 help:  ## Show this help message
@@ -46,8 +46,8 @@ lint-check:  ## Check linting without modifying files (for CI)
 	$(RUFF) check backend
 	$(RUFF) format backend --check
 
-typecheck:  ## Run mypy type checking
-	$(MYPY) backend/app
+typecheck:  ## Run ty type checking
+	$(TY) check backend/app
 
 # ------------------------------------------------------------------ #
 # Database migrations

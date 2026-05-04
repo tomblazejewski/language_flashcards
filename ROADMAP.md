@@ -10,41 +10,41 @@ ADRs covering key architectural decisions live in [`docs/adr/`](docs/adr/).
 **Goal:** A fully tested FastAPI backend that any HTTP client can drive.
 
 ### 1.1 — Project scaffolding
-- [ ] Move `main.py` into `backend/app/` structure
-- [ ] Configure `pyproject.toml` with all backend dependencies (`fastapi`, `uvicorn`, `sqlalchemy`, `alembic`, `pydantic-settings`, `python-jose`, `passlib`, `psycopg2-binary`, `py-fsrs`)
-- [ ] `docker-compose.yml` for local PostgreSQL + backend
-- [ ] `.env.example` documenting all required environment variables
-- [ ] `Makefile` with common dev tasks (`make dev`, `make migrate`, `make test`)
+- [x] Move `main.py` into `backend/app/` structure
+- [x] Configure `pyproject.toml` with all backend dependencies (`fastapi`, `uvicorn`, `sqlalchemy`, `alembic`, `pydantic-settings`, `python-jose`, `passlib`, `psycopg2-binary`, `py-fsrs`)
+- [x] `docker-compose.yml` for local PostgreSQL + backend
+- [x] `.env.example` documenting all required environment variables
+- [x] `Makefile` with common dev tasks (`make dev`, `make migrate`, `make test`)
 
 ### 1.2 — Database models & migrations
-- [ ] SQLAlchemy async models: `User`, `Course`, `Flashcard`, `ReviewConfig`, `ReviewLog`
-- [ ] Alembic migration: initial schema
-- [ ] Seed script for local development data
+- [x] SQLAlchemy async models: `User`, `Course`, `Flashcard`, `ReviewConfig`, `ReviewLog`
+- [x] Alembic migration: initial schema
+- [x] Seed script for local development data
 
 ### 1.3 — Authentication
-- [ ] `POST /auth/register` — create account
-- [ ] `POST /auth/login` — return access + refresh JWT tokens
-- [ ] `POST /auth/refresh` — exchange refresh token for new access token
-- [ ] `POST /auth/logout` — revoke refresh token
-- [ ] Auth middleware / `get_current_user` dependency
+- [x] `POST /auth/register` — create account
+- [x] `POST /auth/login` — return access + refresh JWT tokens
+- [x] `POST /auth/refresh` — exchange refresh token for new access token
+- [x] `POST /auth/logout` — revoke refresh token
+- [x] Auth middleware / `get_current_user` dependency
 
 ### 1.4 — Course & Flashcard CRUD
-- [ ] `GET/POST /courses` — list user's courses, create course (with `column_definitions`)
-- [ ] `GET/PATCH/DELETE /courses/{id}` — retrieve, update, delete course
-- [ ] `GET/POST /courses/{id}/flashcards` — list or create flashcards
-- [ ] `GET/PATCH/DELETE /flashcards/{id}` — retrieve, update, delete flashcard
-- [ ] `GET/POST /courses/{id}/review-configs` — manage which column pairs are tested
+- [x] `GET/POST /courses` — list user's courses, create course (with `column_definitions`)
+- [x] `GET/PATCH/DELETE /courses/{id}` — retrieve, update, delete course
+- [x] `GET/POST /courses/{id}/flashcards` — list or create flashcards
+- [x] `GET/PATCH/DELETE /flashcards/{id}` — retrieve, update, delete flashcard
+- [x] `GET/POST /courses/{id}/review-configs` — manage which column pairs are tested
 
 ### 1.5 — FSRS Study Engine
-- [ ] `GET /study/{review_config_id}/due` — return batch of due flashcards
-- [ ] `POST /study/{review_config_id}/review` — submit rating (Again/Hard/Good/Easy), advance FSRS state
-- [ ] `GET /study/{review_config_id}/stats` — retention stats for a review config
-- [ ] FSRS service isolated in `services/fsrs_engine.py`, fully unit tested
+- [x] `GET /study/{review_config_id}/due` — return batch of due flashcards
+- [x] `POST /study/{review_config_id}/review` — submit rating (Again/Hard/Good/Easy), advance FSRS state
+- [x] `GET /study/{review_config_id}/stats` — retention stats for a review config
+- [x] FSRS service isolated in `services/fsrs_engine.py`, fully unit tested
 
 ### 1.6 — Tests & CI
-- [ ] Pytest setup with async test client (`httpx`)
-- [ ] Tests for all auth, CRUD, and study endpoints
-- [ ] GitHub Actions workflow: lint (`ruff`), type-check (`mypy`), tests
+- [x] Pytest setup with async test client (`httpx`)
+- [x] Tests for all auth, CRUD, and study endpoints
+- [x] GitHub Actions workflow: lint (`ruff`), type-check (`ty`), tests
 
 **PR checklist for Phase 1:** All endpoints return correct status codes, all tests pass, OpenAPI docs render correctly at `/docs`.
 
@@ -55,16 +55,16 @@ ADRs covering key architectural decisions live in [`docs/adr/`](docs/adr/).
 **Goal:** Users can populate courses from existing data without manual card entry.
 
 ### 2.1 — CSV Import
-- [ ] `POST /courses/{id}/import/csv` — upload CSV, auto-detect or manually map columns
-- [ ] Preview endpoint returning first N rows before committing
-- [ ] Duplicate detection (skip or overwrite mode)
-- [ ] Error reporting (row-level validation failures returned in response)
+- [x] `POST /courses/{id}/import/csv` — upload CSV, auto-detect or manually map columns
+- [x] Preview endpoint returning first N rows before committing
+- [x] Duplicate detection (skip or overwrite mode)
+- [x] Error reporting (row-level validation failures returned in response)
 
 ### 2.2 — Anki Import (`.apkg`)
-- [ ] Parse `.apkg` (it is a renamed `.zip` containing SQLite + media)
-- [ ] Map Anki note types to `column_definitions`
-- [ ] Import cards, handle HTML stripping and basic media references
-- [ ] `POST /courses/{id}/import/anki` endpoint
+- [x] Parse `.apkg` (it is a renamed `.zip` containing SQLite + media)
+- [x] Map Anki note types to `column_definitions`
+- [x] Import cards, handle HTML stripping and basic media references
+- [x] `POST /courses/{id}/import/anki` endpoint
 
 **PR checklist for Phase 2:** Import endpoints tested with real sample files; error paths return structured JSON errors.
 
@@ -183,5 +183,5 @@ Each phase should be fully merged and stable before the next begins.
 | Routing (Flutter) | go_router |
 | Containerisation | Docker Compose |
 | Linting | Ruff (Python), `flutter analyze` |
-| Type checking | Mypy (Python) |
+| Type checking | ty (Python) |
 | Testing | Pytest + httpx (Python), Flutter test |

@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
 from app.db.database import Base
+
+if TYPE_CHECKING:
+    from app.models.flashcard import Flashcard
 
 
 class Course(Base):
@@ -32,7 +35,7 @@ class Course(Base):
 
     # relationships
     owner: Mapped[Any] = relationship("User", back_populates="courses")
-    flashcards: Mapped[list[Flashcard]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    flashcards: Mapped[list[Flashcard]] = relationship(
         "Flashcard", back_populates="course", cascade="all, delete-orphan"
     )
     review_configs: Mapped[list[Any]] = relationship(
