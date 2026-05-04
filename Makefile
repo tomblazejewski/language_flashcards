@@ -69,7 +69,8 @@ migrate-history:  ## Show migration history
 # Docker
 # ------------------------------------------------------------------ #
 
-docker-up:  ## Start PostgreSQL and backend via docker-compose
+docker-up:  ## Start PostgreSQL and backend via docker-compose (bootstraps .env if missing)
+	cp -n .env.example .env 2>/dev/null || true
 	docker compose up -d
 
 docker-down:  ## Stop docker-compose services

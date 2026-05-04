@@ -35,3 +35,6 @@ jobs:
 
       - name: Test
         run: uv run pytest backend/tests -q
+
+      - name: Build Docker image
+        run: docker build -t language-flashcards-backend -f backend/Dockerfile .

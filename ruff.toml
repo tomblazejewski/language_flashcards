@@ -65,6 +65,7 @@ ignore = [
     "E501",
     "F403",
     "F405",
+    "UP007", # prefer Union[X, Y] over X | Y
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
